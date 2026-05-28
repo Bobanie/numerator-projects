@@ -1,0 +1,16 @@
+# Тяжёлые бинарные файлы — не храним на GitHub
+*.dwg
+*.bak
+*.pdf
+*.jpg
+*.jpeg
+*.png
+*.tif
+*.tiff
+*.zip
+*.rar
+
+# Системное
+Thumbs.db
+desktop.ini
+.DS_Store
