@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Нумератор схем</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Segoe UI, Arial, sans-serif;
+    font-size: 14px;
+    color: #1a1a1a;
+    background: #f4f5f7;
+  }
+  header {
+    background: #1f3a5f;
+    color: #fff;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0 16px 0 0; font-weight: 600; }
+  button {
+    font-size: 13px;
+    padding: 7px 12px;
+    border: 1px solid #c2c8d0;
+    border-radius: 6px;
+    background: #fff;
+    color: #1a1a1a;
+    cursor: pointer;
+  }
+  button:hover { background: #eef1f5; }
+  button.primary { background: #2d6cdf; color: #fff; border-color: #2d6cdf; }
+  button.primary:hover { background: #2559bd; }
+  button.danger { color: #b00020; border-color: #e3b5be; }
+  header button { border-color: #3a5680; }
+  header label.fontsize-ctrl { font-size: 13px; color: #fff; display: inline-flex; align-items: center; gap: 6px; }
+  header select { font-size: 13px; padding: 6px 8px; border: 1px solid #c2c8d0; border-radius: 6px; background: #fff; color: #1a1a1a; cursor: pointer; }
+  .layout { display: flex; gap: 12px; padding: 12px; align-items: flex-start; }
+  .stage-wrap {
+    flex: 1 1 auto;
+    min-width: 0;
+    background: #fff;
+    border: 1px solid #e0e3e8;
+    border-radius: 8px;
+    padding: 12px;
+    overflow: auto;
+    max-height: calc(100vh - 100px);
+  }
+  #stage {
+    position: relative;
+    display: inline-block;
+    line-height: 0;
+    cursor: crosshair;
+  }
+  #stage img { display: block; height: auto; user-select: none; -webkit-user-drag: none; }
+  .zoom-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .zoom-bar button { font-size: 15px; min-width: 30px; padding: 4px 8px; }
+  .zoom-val { font-size: 13px; color: #444; min-width: 44px; text-align: center; font-weight: 600; }
+  .overlay { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 10; }
+  .empty-hint {
+    color: #6b7280;
+    border: 2px dashed #cbd2db;
+    border-radius: 8px;
+    padding: 48px 24px;
+    text-align: center;
+    background: #fafbfc;
+  }
+  /* Число на полке-выноске: сама полка — это нижняя граница (border-bottom) */
+  .label {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    font-weight: 700;
+    font-size: 36px;
+    line-height: 1.1;
+    color: #000;
+    padding: 0 5px 2px;
+    background: rgba(255,255,255,0.6);
+    cursor: grab;
+    user-select: none;
+    white-space: nowrap;
+  }
+  .label.selected { color: #92400e; background: #ffe9a8; }
+  /* Точка-якорь на элементе: прозрачная зона для захвата мышью (сама точка рисуется на overlay) */
+  .anchor {
+    position: absolute;
+    width: 14px; height: 14px;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    cursor: grab;
+  }
+  .anchor:hover { background: rgba(20,85,214,0.25); }
+  /* Ластик: белые прямоугольники, закрывающие ненужный текст на схеме */
+  .eraser { position: absolute; background: #ffffff; pointer-events: none; }
+  body.erase-mode .eraser { outline: 1px dashed #b00020; }
+  body.erase-mode #stage { cursor: cell; }
+  .erase-preview { position: absolute; background: rgba(255,255,255,0.7); outline: 1px dashed #b00020; pointer-events: none; }
+  .panel {
+    flex: 0 0 420px;
+    background: #fff;
+    border: 1px solid #e0e3e8;
+    border-radius: 8px;
+    padding: 12px;
+    max-height: calc(100vh - 100px);
+    overflow: auto;
+  }
+  .panel h2 { font-size: 14px; margin: 0 0 8px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #e0e3e8; padding: 4px 6px; text-align: left; vertical-align: middle; }
+  th { background: #f0f3f7; font-weight: 600; }
+  td.num { text-align: center; width: 34px; font-weight: 700; color: #0b3aa3; }
+  td.act { width: 30px; text-align: center; }
+  input.cell { width: 100%; border: 1px solid transparent; padding: 3px 4px; font-size: 13px; border-radius: 4px; }
+  input.cell:focus { border-color: #2d6cdf; outline: none; background: #f5f9ff; }
+  input.qty { width: 48px; text-align: center; }
+  tr.selected td { background: #fff6df; }
+  .row-del { color: #b00020; cursor: pointer; font-weight: 700; border: none; background: none; font-size: 16px; padding: 0 4px; }
+  .hint { color: #6b7280; font-size: 12px; margin: 8px 0; line-height: 1.5; }
+  .count { color: #6b7280; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Нумератор схем</h1>
+  <button onclick="document.getElementById('fileInput').click()">Загрузить схему</button>
+  <button id="modeBtn" onclick="toggleErase()">Ластик: выкл</button>
+  <button id="markerModeBtn" onclick="toggleMarkerMode()">Режим: со сноской</button>
+  <button id="rtBtn" onclick="setSpecialMode('rt')">РТ: выкл</button>
+  <button id="rdBtn" onclick="setSpecialMode('rd')">РД: выкл</button>
+  <button id="okBtn" onclick="setSpecialMode('ok')">ОК: выкл</button>
+  <button id="numModeBtn" onclick="cycleNumbering()">Нумерация: все</button>
+  <label class="fontsize-ctrl" title="Размер шрифта номеров на схеме">Шрифт:
+    <select id="fontSizeSelect" onchange="setFontSize(this.value)"></select>
+  </label>
+  <button onclick="undoErase()">Отменить стирание</button>
+  <button class="primary" onclick="exportImage()">Сохранить картинку (PNG)</button>
+  <button class="primary" onclick="exportCsv()">Экспорт спецификации (Excel)</button>
+  <button onclick="saveProject()">Сохранить проект</button>
+  <button onclick="document.getElementById('projInput').click()">Открыть проект</button>
+  <button onclick="undo()">↩ Назад</button>
+  <button class="danger" onclick="clearAll()">Очистить всё</button>
+  <input id="fileInput" type="file" accept="image/*" style="display:none" onchange="onFile(this.files[0])">
+  <input id="projInput" type="file" accept=".json" style="display:none" onchange="onProject(this.files[0])">
+</header>
+
+<div class="layout">
+  <div class="stage-wrap">
+    <div class="zoom-bar" id="zoomBar" style="display:none">
+      <button onclick="setZoom((zoom||1) - 0.25)" title="Уменьшить (−)">−</button>
+      <span class="zoom-val" id="zoomVal">100%</span>
+      <button onclick="setZoom((zoom||1) + 0.25)" title="Увеличить (+)">+</button>
+      <button onclick="fitZoom()">По ширине</button>
+    </div>
+    <div id="stage">
+      <div class="empty-hint" id="emptyHint">
+        Нажми «Загрузить схему» и выбери JPG.<br>
+        Затем кликай по элементам — у каждого появится номер-выноска.
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Спецификация <span class="count" id="count"></span></h2>
+    <div class="hint">
+      Клик по элементу — ставит выноску (точка на элементе + число на полке рядом).
+      Перетаскивай мышью число, чтобы отвести полку, или точку-якорь, чтобы уточнить место.
+      Удаление строки автоматически перенумеровывает остальные.
+      «Ластик» — закрасить ненужный старый текст: включи режим и протяни прямоугольник по нему.
+    </div>
+    <table>
+      <thead>
+        <tr><th>№</th><th>Наименование</th><th>Тип / марка</th><th>Кол-во</th><th></th></tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+// ===== Состояние программы =====
+// Каждая выноска (marker) имеет ДВЕ точки в долях 0..1 от размера картинки:
+//   ax, ay — якорь, точка на самом элементе (куда смотрит линия-указатель);
+//   lx, ly — место числа (полки).
+// Номер выноски = её место в списке (1, 2, 3...).
+let state = {
+  imageData: null,
+  markers: [],  // { ax, ay, lx, ly, name, type, qty }
+  erasers: [],  // { x, y, w, h } — белые прямоугольники поверх старого текста
+  fontSize: 36  // базовый размер шрифта номеров-пометок (px при масштабе 100%)
+};
+let selected = -1;
+let pendingFocus = -1;   // строка, в поле которой нужно сразу поставить курсор после клика
+let eraseMode = false;   // включён ли ластик
+let zoom = null;         // null = авто-подгонка по ширине при первой загрузке
+let markerMode = 'callout'; // 'callout' — со сноской, 'number' — только цифра
+let numberingMode = 'all'; // 'all' | 'odd' | 'even'
+let specialMode = null; // null | 'rt' | 'rd' | 'ok'
+let history = [];
+const MAX_HISTORY = 30;
+
+const SVGNS = 'http://www.w3.org/2000/svg';
+const stage = document.getElementById('stage');
+const tbody = document.getElementById('tbody');
+const STORAGE_KEY = 'numerator_project';
+
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// ===== Размер шрифта пометок (как в Paint) =====
+const DEFAULT_FONT_SIZE = 36;
+const FONT_SIZES = [18, 24, 28, 32, 36, 40, 45, 50, 56, 64, 72];
+function getFontSize() {
+  const v = Number(state.fontSize);
+  return (v && v > 0) ? v : DEFAULT_FONT_SIZE;
+}
+function syncFontSelect() {
+  const sel = document.getElementById('fontSizeSelect');
+  if (!sel) return;
+  const cur = getFontSize();
+  const sizes = FONT_SIZES.includes(cur) ? FONT_SIZES : [...FONT_SIZES, cur].sort((a, b) => a - b);
+  sel.innerHTML = sizes.map(s => '<option value="' + s + '"' + (s === cur ? ' selected' : '') + '>' + s + '</option>').join('');
+}
+function setFontSize(val) {
+  const v = parseInt(val, 10);
+  if (!v || v < 1) return;
+  state.fontSize = v;
+  render();
+  save();
+}
+
+function pushHistory() {
+  history.push(JSON.stringify(state));
+  if (history.length > MAX_HISTORY) history.shift();
+}
+function undo() {
+  if (!history.length) return;
+  state = JSON.parse(history.pop());
+  normalizeMarkers();
+  ensureErasers();
+  selected = -1;
+  render();
+  save();
+}
+
+// ===== Масштабирование =====
+function setZoom(z) {
+  const img = stage.querySelector('img');
+  if (!img || !img.naturalWidth) return;
+  if (z === null) {
+    const wrap = document.querySelector('.stage-wrap');
+    zoom = Math.min(1, (wrap.clientWidth - 24) / img.naturalWidth);
+  } else {
+    zoom = Math.max(0.1, Math.min(4.0, z));
+  }
+  img.style.width = Math.round(img.naturalWidth * zoom) + 'px';
+  stage.querySelectorAll('.label').forEach(el => {
+    el.style.fontSize = Math.round(getFontSize() * zoom) + 'px';
+  });
+  positionOverlay();
+  const zv = document.getElementById('zoomVal');
+  if (zv) zv.textContent = Math.round(zoom * 100) + '%';
+}
+function fitZoom() { setZoom(null); }
+function applyZoom() { setZoom(zoom); }
+
+function nextMarkerNumber() {
+  const max = state.markers.length ? Math.max(...state.markers.map(m => m.num || 0)) : 0;
+  if (numberingMode === 'odd')  return max % 2 === 0 ? max + 1 : max + 2;
+  if (numberingMode === 'even') return max % 2 === 1 ? max + 1 : max + 2;
+  return max + 1;
+}
+
+const NUM_MODE_LABELS = { all: 'Нумерация: все', odd: 'Нумерация: нечётные', even: 'Нумерация: чётные' };
+function cycleNumbering() {
+  numberingMode = numberingMode === 'all' ? 'odd' : numberingMode === 'odd' ? 'even' : 'all';
+  const btn = document.getElementById('numModeBtn');
+  btn.textContent = NUM_MODE_LABELS[numberingMode];
+  btn.classList.toggle('primary', numberingMode !== 'all');
+}
+
+const SPECIAL_PREFIX = { rt: 'РТ', rd: 'РД', ok: 'ОК' };
+
+function nextSpecialNumber(kind) {
+  return state.markers.filter(m => m.kind === kind).length + 1;
+}
+function setSpecialMode(kind) {
+  specialMode = specialMode === kind ? null : kind;
+  Object.keys(SPECIAL_PREFIX).forEach(k => {
+    const btn = document.getElementById(k + 'Btn');
+    const on = specialMode === k;
+    btn.textContent = SPECIAL_PREFIX[k] + ': ' + (on ? 'вкл' : 'выкл');
+    btn.classList.toggle('primary', on);
+  });
+}
+
+function toggleMarkerMode() {
+  markerMode = markerMode === 'callout' ? 'number' : 'callout';
+  const btn = document.getElementById('markerModeBtn');
+  btn.textContent = markerMode === 'callout' ? 'Режим: со сноской' : 'Режим: только цифра';
+  btn.classList.toggle('primary', markerMode === 'number');
+}
+
+// ===== Загрузка картинки =====
+function onFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    state.imageData = e.target.result;
+    state.markers = [];
+    state.erasers = [];
+    selected = -1;
+    zoom = null;
+    render();
+    save();
+  };
+  reader.readAsDataURL(file);
+}
+
+// Совместимость со старыми проектами, где была одна точка x,y
+function normalizeMarkers() {
+  state.markers = (state.markers || []).map((m, i) => {
+    if (m.ax === undefined && m.x !== undefined) {
+      m = {
+        ax: m.x, ay: m.y,
+        lx: clamp(m.x + 0.02, 0.02, 0.98),
+        ly: clamp(m.y - 0.03, 0.02, 0.98),
+        name: m.name || '', type: m.type || '', qty: m.qty != null ? m.qty : 1
+      };
+    }
+    if (m.num == null) m = { ...m, num: i + 1 };
+    return m;
+  });
+}
+
+// ===== Отрисовка схемы и выносок =====
+function render() {
+  syncFontSelect();
+  document.getElementById('zoomBar').style.display = state.imageData ? 'flex' : 'none';
+  stage.innerHTML = '';
+  if (!state.imageData) {
+    const hint = document.createElement('div');
+    hint.className = 'empty-hint';
+    hint.innerHTML = 'Нажми «Загрузить схему» и выбери JPG.<br>Затем кликай по элементам — у каждого появится номер-выноска.';
+    stage.appendChild(hint);
+    renderTable();
+    return;
+  }
+
+  const img = document.createElement('img');
+  img.src = state.imageData;
+  img.onclick = ev => { if (eraseMode) return; onStageClick(ev); };
+  img.onmousedown = ev => { if (eraseMode) startErase(ev); };
+  img.onload = applyZoom;
+  stage.appendChild(img);
+
+  (state.erasers || []).forEach(r => {
+    const d = document.createElement('div');
+    d.className = 'eraser';
+    d.style.left = (r.x * 100) + '%';
+    d.style.top = (r.y * 100) + '%';
+    d.style.width = (r.w * 100) + '%';
+    d.style.height = (r.h * 100) + '%';
+    stage.appendChild(d);
+  });
+
+  const svg = document.createElementNS(SVGNS, 'svg');
+  svg.setAttribute('class', 'overlay');
+
+  state.markers.forEach((m, i) => {
+    const lbl = document.createElement('div');
+    lbl.className = 'label' + (i === selected ? ' selected' : '');
+    lbl.style.left = (m.lx * 100) + '%';
+    lbl.style.top = (m.ly * 100) + '%';
+    lbl.style.fontSize = Math.round(getFontSize() * (zoom || 1)) + 'px';
+    lbl.textContent = m.label ?? m.num;
+    lbl.onmousedown = ev => startDrag(ev, i, 'label');
+    stage.appendChild(lbl);
+
+    if (m.mode !== 'number') {
+      const an = document.createElement('div');
+      an.className = 'anchor';
+      an.style.left = (m.ax * 100) + '%';
+      an.style.top = (m.ay * 100) + '%';
+      an.title = 'Точка на элементе — потяни, чтобы уточнить';
+      an.onmousedown = ev => startDrag(ev, i, 'anchor');
+      stage.appendChild(an);
+    }
+  });
+
+  stage.appendChild(svg);
+
+  renderTable();
+  if (img.complete) applyZoom();
+
+  if (pendingFocus >= 0 && tbody.rows[pendingFocus]) {
+    const inp = tbody.rows[pendingFocus].querySelector('input.cell');
+    if (inp) inp.focus();
+  }
+  pendingFocus = -1;
+}
+
+// Рисуем линии-указатели и точки-якоря поверх картинки
+function positionOverlay() {
+  const img = stage.querySelector('img');
+  const svg = stage.querySelector('svg.overlay');
+  if (!img || !svg) return;
+  const W = img.clientWidth, H = img.clientHeight;
+  if (!W || !H) return;
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+  const labels = stage.querySelectorAll('.label');
+
+  // Проход 1: диагональные линии и точки-якоря
+  state.markers.forEach((m, i) => {
+    if (m.mode === 'number') return;
+    const cx = m.lx * W, cy = m.ly * H;
+    const ax = m.ax * W, ay = m.ay * H;
+    const lbl = labels[i];
+    const lh = lbl ? lbl.offsetHeight : 18;
+    const lw = lbl ? lbl.offsetWidth : 18;
+    const bottomY = cy + lh / 2;
+    const x1 = cx - lw / 2, x2 = cx + lw / 2;
+    const endX = (ax < cx) ? x1 : x2;
+    const color = (i === selected) ? '#d97706' : '#000';
+
+    const line = document.createElementNS(SVGNS, 'line');
+    line.setAttribute('x1', ax); line.setAttribute('y1', ay);
+    line.setAttribute('x2', endX); line.setAttribute('y2', bottomY);
+    line.setAttribute('stroke', color);
+    line.setAttribute('stroke-width', '1.4');
+    line.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(line);
+
+    const dot = document.createElementNS(SVGNS, 'circle');
+    dot.setAttribute('cx', ax); dot.setAttribute('cy', ay);
+    dot.setAttribute('r', '1.5');
+    dot.setAttribute('fill', color);
+    svg.appendChild(dot);
+  });
+
+  // Проход 2: полки поверх цифр (SVG уже выше div-меток в DOM)
+  state.markers.forEach((m, i) => {
+    if (m.mode === 'number') return;
+    const cx = m.lx * W, cy = m.ly * H;
+    const lbl = labels[i];
+    const lh = lbl ? lbl.offsetHeight : 18;
+    const lw = lbl ? lbl.offsetWidth : 18;
+    const bottomY = cy + lh / 2;
+    const x1 = cx - lw / 2, x2 = cx + lw / 2;
+    const color = (i === selected) ? '#d97706' : '#000';
+
+    const shelf = document.createElementNS(SVGNS, 'line');
+    shelf.setAttribute('x1', x1); shelf.setAttribute('y1', bottomY);
+    shelf.setAttribute('x2', x2); shelf.setAttribute('y2', bottomY);
+    shelf.setAttribute('stroke', color);
+    shelf.setAttribute('stroke-width', '1.4');
+    shelf.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(shelf);
+  });
+}
+
+// Клик по картинке = новая выноска: якорь в точке клика, число — рядом сверху
+function onStageClick(ev) {
+  if (dragMoved) { dragMoved = false; return; }
+  const rect = ev.currentTarget.getBoundingClientRect();
+  const x = (ev.clientX - rect.left) / rect.width;
+  const y = (ev.clientY - rect.top) / rect.height;
+  pushHistory();
+  const isCallout = markerMode === 'callout';
+  if (specialMode) {
+    state.markers.push({
+      ax: x, ay: y,
+      lx: isCallout ? clamp(x + 0.02, 0.02, 0.98) : x,
+      ly: isCallout ? clamp(y - 0.03, 0.02, 0.98) : y,
+      mode: markerMode,
+      kind: specialMode,
+      label: SPECIAL_PREFIX[specialMode] + nextSpecialNumber(specialMode)
+    });
+  } else {
+    state.markers.push({
+      ax: x, ay: y,
+      lx: isCallout ? clamp(x + 0.02, 0.02, 0.98) : x,
+      ly: isCallout ? clamp(y - 0.03, 0.02, 0.98) : y,
+      name: '', type: '', qty: 1,
+      mode: markerMode,
+      num: nextMarkerNumber()
+    });
+  }
+  selected = state.markers.length - 1;
+  pendingFocus = selected;
+  render();
+  save();
+}
+
+// ===== Перетаскивание числа или якоря =====
+let dragIndex = -1, dragWhich = null, dragMoved = false;
+function startDrag(ev, i, which) {
+  ev.stopPropagation();
+  ev.preventDefault();
+  pushHistory();
+  dragIndex = i;
+  dragWhich = which;
+  dragMoved = false;
+  selected = i;
+  render();
+  document.addEventListener('mousemove', onDrag);
+  document.addEventListener('mouseup', endDrag);
+}
+function onDrag(ev) {
+  if (dragIndex < 0) return;
+  const img = stage.querySelector('img');
+  const rect = img.getBoundingClientRect();
+  const x = clamp((ev.clientX - rect.left) / rect.width, 0, 1);
+  const y = clamp((ev.clientY - rect.top) / rect.height, 0, 1);
+  const m = state.markers[dragIndex];
+  if (dragWhich === 'label') { m.lx = x; m.ly = y; if (m.mode === 'number') { m.ax = x; m.ay = y; } }
+  else { m.ax = x; m.ay = y; }
+  dragMoved = true;
+  const el = stage.querySelectorAll(dragWhich === 'label' ? '.label' : '.anchor')[dragIndex];
+  if (el) { el.style.left = (x * 100) + '%'; el.style.top = (y * 100) + '%'; }
+  positionOverlay();
+}
+function endDrag() {
+  if (dragIndex >= 0) save();
+  dragIndex = -1;
+  dragWhich = null;
+  document.removeEventListener('mousemove', onDrag);
+  document.removeEventListener('mouseup', endDrag);
+}
+
+// ===== Ластик: закрашиваем ненужный старый текст белым прямоугольником =====
+let eraseStart = null, erasePreviewEl = null;
+function toggleErase() {
+  eraseMode = !eraseMode;
+  document.body.classList.toggle('erase-mode', eraseMode);
+  const b = document.getElementById('modeBtn');
+  b.textContent = 'Ластик: ' + (eraseMode ? 'вкл' : 'выкл');
+  b.classList.toggle('primary', eraseMode);
+}
+function undoErase() {
+  if (state.erasers && state.erasers.length) { state.erasers.pop(); render(); save(); }
+}
+function ensureErasers() { if (!Array.isArray(state.erasers)) state.erasers = []; }
+function startErase(ev) {
+  ev.preventDefault();
+  const rect = ev.currentTarget.getBoundingClientRect();
+  eraseStart = {
+    x: clamp((ev.clientX - rect.left) / rect.width, 0, 1),
+    y: clamp((ev.clientY - rect.top) / rect.height, 0, 1)
+  };
+  erasePreviewEl = document.createElement('div');
+  erasePreviewEl.className = 'erase-preview';
+  erasePreviewEl.style.left = (eraseStart.x * 100) + '%';
+  erasePreviewEl.style.top = (eraseStart.y * 100) + '%';
+  stage.appendChild(erasePreviewEl);
+  document.addEventListener('mousemove', onEraseMove);
+  document.addEventListener('mouseup', onEraseEnd);
+}
+function eraseRectFrom(ev) {
+  const img = stage.querySelector('img');
+  const rect = img.getBoundingClientRect();
+  const x = clamp((ev.clientX - rect.left) / rect.width, 0, 1);
+  const y = clamp((ev.clientY - rect.top) / rect.height, 0, 1);
+  return { left: Math.min(x, eraseStart.x), top: Math.min(y, eraseStart.y), w: Math.abs(x - eraseStart.x), h: Math.abs(y - eraseStart.y) };
+}
+function onEraseMove(ev) {
+  if (!eraseStart || !erasePreviewEl) return;
+  const r = eraseRectFrom(ev);
+  erasePreviewEl.style.left = (r.left * 100) + '%';
+  erasePreviewEl.style.top = (r.top * 100) + '%';
+  erasePreviewEl.style.width = (r.w * 100) + '%';
+  erasePreviewEl.style.height = (r.h * 100) + '%';
+}
+function onEraseEnd(ev) {
+  document.removeEventListener('mousemove', onEraseMove);
+  document.removeEventListener('mouseup', onEraseEnd);
+  if (!eraseStart) return;
+  const r = eraseRectFrom(ev);
+  if (erasePreviewEl) { erasePreviewEl.remove(); erasePreviewEl = null; }
+  eraseStart = null;
+  if (r.w > 0.004 && r.h > 0.004) {
+    pushHistory();
+    state.erasers.push({ x: r.left, y: r.top, w: r.w, h: r.h });
+    render();
+    save();
+  }
+}
+
+// ===== Таблица спецификации =====
+function renderTable() {
+  tbody.innerHTML = '';
+  state.markers.forEach((m, i) => {
+    if (m.kind) return;
+    const tr = document.createElement('tr');
+    if (i === selected) tr.className = 'selected';
+    tr.onclick = () => { selected = i; render(); };
+
+    const tdNum = document.createElement('td');
+    tdNum.className = 'num';
+    tdNum.textContent = m.num;
+
+    const tdName = document.createElement('td');
+    tdName.appendChild(makeInput(m, 'name', 'наименование'));
+
+    const tdType = document.createElement('td');
+    tdType.appendChild(makeInput(m, 'type', 'тип / марка'));
+
+    const tdQty = document.createElement('td');
+    const qty = makeInput(m, 'qty', '1');
+    qty.classList.add('qty');
+    qty.type = 'number'; qty.min = '0';
+    tdQty.appendChild(qty);
+
+    const tdAct = document.createElement('td');
+    tdAct.className = 'act';
+    const del = document.createElement('button');
+    del.className = 'row-del';
+    del.textContent = '×';
+    del.title = 'Удалить позицию';
+    del.onclick = (e) => { e.stopPropagation(); deleteMarker(i); };
+    tdAct.appendChild(del);
+
+    tr.append(tdNum, tdName, tdType, tdQty, tdAct);
+    tbody.appendChild(tr);
+  });
+  document.getElementById('count').textContent = state.markers.length ? '(' + state.markers.length + ' поз.)' : '';
+}
+
+function makeInput(marker, field, placeholder) {
+  const inp = document.createElement('input');
+  inp.className = 'cell';
+  inp.value = marker[field];
+  inp.placeholder = placeholder;
+  inp.oninput = () => { marker[field] = inp.value; save(); };
+  inp.onclick = e => e.stopPropagation();
+  return inp;
+}
+
+function deleteMarker(i) {
+  pushHistory();
+  state.markers.splice(i, 1);
+  if (selected === i) selected = -1;
+  else if (selected > i) selected--;
+  render();
+  save();
+}
+
+// ===== Сохранение картинки с выносками =====
+function exportImage() {
+  if (!state.imageData) { alert('Сначала загрузи схему.'); return; }
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+
+    // Сначала закрашиваем стёртые места белым
+    ctx.fillStyle = '#ffffff';
+    (state.erasers || []).forEach(r => {
+      ctx.fillRect(r.x * canvas.width, r.y * canvas.height, r.w * canvas.width, r.h * canvas.height);
+    });
+
+    const fs = getFontSize();
+    const lw = Math.max(1, fs / 18);
+    ctx.font = 'bold ' + fs + 'px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+
+    function markerGeom(m) {
+      const cx = m.lx * canvas.width, cy = m.ly * canvas.height;
+      const ax = m.ax * canvas.width, ay = m.ay * canvas.height;
+      const num = m.label ?? String(m.num);
+      const tw = ctx.measureText(num).width;
+      const half = tw / 2 + fs * 0.35;
+      const shelfY = cy + fs * 0.55;
+      const x1 = cx - half, x2 = cx + half;
+      const endX = (ax < cx) ? x1 : x2;
+      return { cx, cy, ax, ay, num, shelfY, x1, x2, endX };
+    }
+
+    // Проход 1: все диагональные линии и точки-якоря
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = lw;
+    ctx.lineCap = 'round';
+    state.markers.forEach(m => {
+      if (m.mode === 'number') return;
+      const { ax, ay, endX, shelfY } = markerGeom(m);
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(endX, shelfY); ctx.stroke();
+      ctx.beginPath(); ctx.arc(ax, ay, Math.max(1.1, lw * 0.83), 0, Math.PI * 2);
+      ctx.fillStyle = '#000'; ctx.fill();
+    });
+
+    // Проход 2: все цифры — белый фон точно по размеру текста, потом сама цифра
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    state.markers.forEach(m => {
+      const { cx, shelfY, num } = markerGeom(m);
+      const baseline = shelfY - fs * 0.18;
+      const metrics = ctx.measureText(num);
+      const tW = metrics.width;
+      const tAscent = metrics.actualBoundingBoxAscent || fs * 0.72;
+      const tDescent = metrics.actualBoundingBoxDescent || 0;
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.fillRect(cx - tW / 2, baseline - tAscent, tW, tAscent + tDescent);
+      ctx.fillStyle = '#000';
+      ctx.fillText(num, cx, baseline);
+    });
+
+    // Проход 3: все полки поверх цифр
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = lw;
+    ctx.lineCap = 'round';
+    state.markers.forEach(m => {
+      if (m.mode === 'number') return;
+      const { x1, x2, shelfY } = markerGeom(m);
+      ctx.beginPath(); ctx.moveTo(x1, shelfY); ctx.lineTo(x2, shelfY); ctx.stroke();
+    });
+
+    canvas.toBlob(blob => downloadBlob(blob, 'схема_с_номерами.png'), 'image/png');
+  };
+  img.src = state.imageData;
+}
+
+// ===== Экспорт спецификации в Excel (CSV) =====
+function exportCsv() {
+  if (!state.markers.length) { alert('Нет ни одной позиции.'); return; }
+  let rows = [['№ поз.', 'Наименование', 'Тип / марка', 'Кол-во']];
+  state.markers.forEach(m => {
+    if (m.kind) return;
+    rows.push([String(m.num), m.name || '', m.type || '', String(m.qty != null ? m.qty : '')]);
+  });
+  const csv = rows.map(r => r.map(csvCell).join(';')).join('\r\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  downloadBlob(blob, 'спецификация.csv');
+}
+function csvCell(v) {
+  v = String(v);
+  if (/[";\r\n]/.test(v)) v = '"' + v.replace(/"/g, '""') + '"';
+  return v;
+}
+
+// ===== Сохранить / открыть проект (чтобы продолжить позже) =====
+function saveProject() {
+  const blob = new Blob([JSON.stringify(state)], { type: 'application/json' });
+  downloadBlob(blob, 'проект_нумератора.json');
+}
+function onProject(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      state = JSON.parse(e.target.result);
+      normalizeMarkers();
+      ensureErasers();
+      selected = -1;
+      zoom = null;
+      render();
+      save();
+    } catch (err) { alert('Не удалось открыть файл проекта.'); }
+  };
+  reader.readAsText(file);
+}
+
+function clearAll() {
+  if (!confirm('Удалить все выноски? Картинка останется.')) return;
+  pushHistory();
+  state.markers = [];
+  selected = -1;
+  render();
+  save();
+}
+
+// ===== Вспомогательное =====
+function downloadBlob(blob, filename) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function save() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+}
+function load() {
+  try {
+    const s = localStorage.getItem(STORAGE_KEY);
+    if (s) { state = JSON.parse(s); }
+  } catch (e) {}
+}
+
+window.addEventListener('resize', () => { if (state.imageData) applyZoom(); });
+
+stage.addEventListener('wheel', ev => {
+  if (!state.imageData) return;
+  ev.preventDefault();
+  setZoom((zoom || 1) + (ev.deltaY > 0 ? -0.1 : 0.1));
+}, { passive: false });
+
+load();
+normalizeMarkers();
+ensureErasers();
+render();
+</script>
+</body>
+</html>
